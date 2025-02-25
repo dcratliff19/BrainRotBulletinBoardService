@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>BrainRotBBS - Terminal Chaos</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm/css/xterm.css" />
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background: url('https://media1.tenor.com/m/idUJY-zV9oIAAAAC/aware.gif') no-repeat center center fixed;
+      background-size: cover;
+      font-family: 'Courier New', monospace;
+    }
+    #terminal-container {
+      width: 80vw;
+      height: 80vh;
+      margin: 5vh auto;
+      background: rgba(0, 0, 0, 0.8);
+      border: 4px solid #00ff00;
+      border-radius: 10px;
+      box-shadow: 0 0 20px #00ff00, 0 0 40px #ff00ff, 0 0 60px #00ffff;
+      position: relative;
+      overflow: hidden;
+    }
+    #terminal-container::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(to bottom, transparent, rgba(0, 255, 0, 0.1));
+      pointer-events: none;
+    }
+    .glitch {
+      animation: glitch 0.3s infinite;
+    }
+    @keyframes glitch {
+      0% { transform: translate(0); }
+      20% { transform: translate(-2px, 2px); }
+      40% { transform: translate(-2px, -2px); }
+      60% { transform: translate(2px, 2px); }
+      80% { transform: translate(2px, -2px); }
+      100% { transform: translate(0); }
+    }
+  </style>
+</head>
+<body>
+  <div id="terminal-container"></div>
+  <!-- xterm.js library -->
+  <script src="https://cdn.jsdelivr.net/npm/xterm/lib/xterm.js"></script>
+  <!-- PeerJS library -->
+  <script src="https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.min.js"></script>
+  <script>
+    // Initialize terminal
+    const term = new Terminal({
+      cursorBlink: true,
+      theme: { background: 'transparent', foreground: '#ffffff' }
+    });
+    term.open(document.getElementById('terminal-container'));
+
+    // State and variables
+    let state = 'login';
+    let currentInput = '';
+    let username = '';
+    let editorContent = '';
+    let inputHandler = null;
+    let currentDocIndex = null;
+    let activeConnections = [];
+    let savedDocs = JSON.parse(localStorage.getItem('bbsDocs')) || [];
+    let peer = null;
+    let chaosMode = false;
+    let rotScore = 0;
+    let commandHistory = []; // Store previous commands
+    let historyIndex = -1; // Current position in history (-1 means new input)
+
+    // Load sayings from local storage or use defaults
+    let memes = JSON.parse(localStorage.getItem('bbsSayings')) || [
+      'SKIBIDI BOP YES YES YES',
+      'Ohio Rizz Overload',
+      'Brain Rot Maximal',
+      'Yeet into the Void',
+      'Rizzler Strikes Again'
+    ];
+
+    // Write funky prompts
+    function writePrompt() {
+      if (state === 'login') {
+        term.write('\r\nSpill ur username, brain rotter: ');
+      } else if (state === 'command') {
+        const rotLevel = Math.floor(Math.random() * 100);
+        term.write(`\r\n${username} (rot level: ${rotLevel} | score: ${rotScore})> `);
+      } else if (state === 'editor') {
+        term.write('\r\n[Editor - type ur rot] ');
+      }
+    }
+
+    // Handle input setup
+    function initInputHandler() {
+      if (inputHandler) {
+        inputHandler.dispose();
+      }
+      inputHandler = term.onData(handleInput);
+    }
+
+    // Handle key presses with chaos mode and history navigation
+    function handleInput(data) {
+      if (chaosMode && Math.random() < 0.15 && data.length === 1) {
+        data = data.split('').map(c => Math.random() < 0.3 ? String.fromCharCode(97 + Math.floor(Math.random() * 26)) : c).join('');
+      }
+      if (data === '\r') { // Enter
+        term.write('\r\n');
+        if (currentInput.trim()) {
+          commandHistory.unshift(currentInput.trim()); // Add to history
+          if (commandHistory.length > 50) commandHistory.pop(); // Limit to 50 entries
+          historyIndex = -1; // Reset to new input
+        }
+        processLine(currentInput);
+        currentInput = '';
+      } else if (data === '\u007F') { // Backspace
+        if (currentInput.length > 0) {
+          currentInput = currentInput.slice(0, -1);
+          term.write('\b \b');
+        }
+      } else if (data === '\u001b[A') { // Up arrow
+        if (commandHistory.length > 0 && historyIndex < commandHistory.length - 1) {
+          // Clear current line
+          for (let i = 0; i < currentInput.length; i++) {
+            term.write('\b \b');
+          }
+          historyIndex++;
+          currentInput = commandHistory[historyIndex];
+          term.write(currentInput);
+        }
+      } else if (data === '\u001b[B') { // Down arrow
+        if (historyIndex > -1) {
+          // Clear current line
+          for (let i = 0; i < currentInput.length; i++) {
+            term.write('\b \b');
+          }
+          historyIndex--;
+          if (historyIndex === -1) {
+            currentInput = '';
+          } else {
+            currentInput = commandHistory[historyIndex];
+            term.write(currentInput);
+          }
+        }
+      } else {
+        currentInput += data;
+        term.write(data);
+      }
+    }
+
+    // Random chaos events
+    function triggerRandomEvent() {
+      const events = [
+        () => { term.write('\r\n[EVENT]: A wild SKIBIDI invades! Type /skibidi to fight back!\r\n'); writePrompt(); },
+        () => { chaosMode = true; term.write('\r\n[EVENT]: Chaos wave hits! Typing scrambled for 10s!\r\n'); writePrompt(); setTimeout(() => { chaosMode = false; term.write('Chaos wave passed.\r\n'); writePrompt(); }, 10000); },
+        () => { term.write('\r\n[EVENT]: Neon glitch incoming!\r\n'); document.getElementById('terminal-container').classList.add('glitch'); setTimeout(() => document.getElementById('terminal-container').classList.remove('glitch'), 5000); writePrompt(); }
+      ];
+      if (Math.random() < 0.05) {
+        events[Math.floor(Math.random() * events.length)]();
+      }
+    }
+
+    // Process commands
+    function processLine(line) {
+      line = line.trim();
+      triggerRandomEvent();
+      if (state === 'login') {
+        username = line || 'anonymous';
+        term.write(`Welcome, ${username}!\r\n`);
+        initPeer();
+        state = 'command';
+        writePrompt();
+      } else if (state === 'command') {
+        if (line === '/edit') {
+          state = 'editor';
+          editorContent = '';
+          currentDocIndex = null;
+          term.write('Entering document editor. Type /save to yeet it.\r\n');
+          writePrompt();
+        } else if (line === '/listpeers') {
+          if (activeConnections.length === 0) {
+            term.write('No active peer connections.\r\n');
+          } else {
+            term.write('Active peers:\r\n');
+            activeConnections.forEach((conn, index) => {
+              term.write(`${index + 1}: ${conn.peer}\r\n`);
+            });
+          }
+          writePrompt();
+        } else if (line === '/listdocs') {
+          if (savedDocs.length === 0) {
+            term.write('No saved documents.\r\n');
+          } else {
+            term.write('Saved Brain Rot Docs:\r\n');
+            savedDocs.forEach((doc, index) => {
+              const preview = doc.content.length > 30 ? doc.content.slice(0, 30) + '...' : doc.content;
+              const date = new Date(doc.timestamp).toLocaleString();
+              term.write(`${index + 1}: [${date}] ${preview}\r\n`);
+            });
+          }
+          writePrompt();
+        } else if (line.startsWith('/open')) {
+          const parts = line.split(' ');
+          if (parts.length < 2) {
+            term.write('Usage: /open <doc number>\r\n');
+          } else {
+            let index = parseInt(parts[1], 10) - 1;
+            if (isNaN(index) || index < 0 || index >= savedDocs.length) {
+              term.write('Invalid document number, brain rotter!\r\n');
+            } else {
+              const doc = savedDocs[index];
+              editorContent = doc.content;
+              currentDocIndex = index;
+              state = 'editor';
+              term.write(`Opening doc ${index + 1} for editing:\r\n`);
+              term.write(`${doc.content}\r\n`);
+              term.write('Edit away! Type /save to update it.\r\n');
+              writePrompt();
+            }
+          }
+        } else if (line.startsWith('/chat')) {
+          const parts = line.split(' ');
+          if (parts.length < 3) {
+            term.write('Usage: /chat <peer> <message>\r\n');
+          } else {
+            const targetPeer = parts[1];
+            const message = parts.slice(2).join(' ');
+            const conn = activeConnections.find(c => c.peer === targetPeer);
+            if (conn) {
+              conn.send(`[${username} whispers]: ${message}`);
+              term.write(`Sent to ${targetPeer}: ${message}\r\n`);
+            } else {
+              term.write(`Error: ${targetPeer} is lost in the brain rot void!\r\n`);
+            }
+          }
+          writePrompt();
+        } else if (line.startsWith('/broadcast')) {
+          const message = line.slice(10).trim();
+          if (message) {
+            activeConnections.forEach(conn => {
+              conn.send(`[${username} yells]: ${message}`);
+            });
+            term.write(`Yeeted into the ether: ${message}\r\n`);
+          } else {
+            term.write('Usage: /broadcast <message> - Don’t yell silently!\r\n');
+          }
+          writePrompt();
+        } else if (line.startsWith('/share')) {
+          const parts = line.split(' ');
+          if (parts.length < 3) {
+            term.write('Usage: /share <doc number> <peer>\r\n');
+          } else {
+            const docIndex = parseInt(parts[1], 10) - 1;
+            const targetPeer = parts[2];
+            if (isNaN(docIndex) || docIndex < 0 || docIndex >= savedDocs.length) {
+              term.write('That doc doesn’t exist, brain rotter!\r\n');
+            } else {
+              const conn = activeConnections.find(c => c.peer === targetPeer);
+              if (conn) {
+                const doc = savedDocs[docIndex];
+                conn.send(`[${username} shared a brain rot doc]: ${doc.content}`);
+                term.write(`Shared doc ${parts[1]} with ${targetPeer}.\r\n`);
+              } else {
+                term.write(`${targetPeer} ain’t here to receive your rot!\r\n`);
+              }
+            }
+          }
+          writePrompt();
+        } else if (line === '/skibidi') {
+          term.write(`${memes[Math.floor(Math.random() * memes.length)]}\r\n`);
+          rotScore += 10;
+          writePrompt();
+        } else if (line.startsWith('/connect')) {
+          const parts = line.split(' ');
+          if (parts.length < 2) {
+            term.write('Usage: /connect <peer>\r\n');
+          } else {
+            const targetPeer = parts[1];
+            const conn = peer.connect(targetPeer);
+            conn.on('open', () => {
+              activeConnections.push(conn);
+              term.write(`Connected to ${targetPeer}! Brain rot incoming.\r\n`);
+              writePrompt();
+            });
+            conn.on('data', (data) => {
+              term.write(`\r\n${data}\r\n`);
+              writePrompt();
+            });
+            conn.on('close', () => {
+              activeConnections = activeConnections.filter(c => c !== conn);
+              term.write(`\r\n[SYSTEM]: ${targetPeer} has yeeted out.\r\n`);
+              writePrompt();
+            });
+            conn.on('error', (err) => {
+              term.write(`Failed to vibe with ${targetPeer}: ${err}\r\n`);
+              writePrompt();
+            });
+          }
+        } else if (line === '/help') {
+          term.write('BrainRotBBS Commands - Get Ur Rot On:\r\n');
+          term.write('/connect <peer> - Link up with a peer\r\n');
+          term.write('/chat <peer> <message> - Whisper some rot\r\n');
+          term.write('/broadcast <message> - Yell into the void\r\n');
+          term.write('/listpeers - Who’s rotting with u\r\n');
+          term.write('/edit - Start a fresh brain rot doc\r\n');
+          term.write('/open <doc number> - Edit an old rot pile\r\n');
+          term.write('/listdocs - Peek at ur saved rot\r\n');
+          term.write('/share <doc number> <peer> - Spread rot to a peer\r\n');
+          term.write('/skibidi - Unleash meme chaos (+10 rot score)\r\n');
+          term.write('/meme - Drop a random brain rot meme\r\n');
+          term.write('/chaos - Toggle chaos mode (typing gets wild)\r\n');
+          term.write('/portal - Jump into a glitch dimension\r\n');
+          term.write('/infect <peer> - Send chaos to a peer\r\n');
+          term.write('/game - Play "Rot or Not" mini-game\r\n');
+          term.write('/secret - ???\r\n');
+          term.write('/sayings - List editable brain rot sayings\r\n');
+          term.write('/edit-saying <index> <new-saying> - Edit a saying\r\n');
+          term.write('/help - This vibe check (use ↑/↓ to scroll history)\r\n');
+          term.write('In editor: /save to yeet it back to storage\r\n');
+          writePrompt();
+        } else if (line === '/chaos') {
+          chaosMode = !chaosMode;
+          term.write(chaosMode ? 'Chaos mode activated! Buckle up!\r\n' : 'Chaos mode deactivated. Back to normal... for now.\r\n');
+          writePrompt();
+        } else if (line === '/meme') {
+          const randomMeme = memes[Math.floor(Math.random() * memes.length)];
+          term.write(`\r\n${randomMeme}\r\n`);
+          writePrompt();
+        } else if (line === '/portal') {
+          term.write('Entering the portal...\r\n');
+          term.options.theme = { background: 'transparent', foreground: '#00ff00' };
+          document.getElementById('terminal-container').classList.add('glitch');
+          setTimeout(() => {
+            term.options.theme = { background: 'transparent', foreground: '#ffffff' };
+            document.getElementById('terminal-container').classList.remove('glitch');
+            term.write('Back from the portal.\r\n');
+            writePrompt();
+          }, 5000);
+        } else if (line.startsWith('/infect')) {
+          const parts = line.split(' ');
+          if (parts.length < 2) {
+            term.write('Usage: /infect <peer>\r\n');
+          } else {
+            const targetPeer = parts[1];
+            const conn = activeConnections.find(c => c.peer === targetPeer);
+            if (conn) {
+              conn.send('[INFECT]');
+              term.write(`Infection sent to ${targetPeer}!\r\n`);
+            } else {
+              term.write(`Error: ${targetPeer} is not connected.\r\n`);
+            }
+          }
+          writePrompt();
+        } else if (line === '/game') {
+          term.write('Welcome to "Rot or Not"! Guess if it’s rot (y/n). Ready?\r\n');
+          const rotItem = memes[Math.floor(Math.random() * memes.length)];
+          term.write(`Item: ${rotItem}\r\n`);
+          state = 'game';
+          writePrompt();
+        } else if (line === '/secret') {
+          term.write('\r\nYou found the secret! Here’s your rot reward...\r\n');
+          term.write('  𝕽𝖎𝖟𝖟 𝕮𝖔𝖉𝖊 𝖀𝖓𝖑𝖔𝖈𝖐𝖊𝖉: 42069\r\n');
+          rotScore += 420;
+          writePrompt();
+        } else if (line === '/sayings') {
+          term.write('Brain Rot Sayings:\r\n');
+          memes.forEach((saying, index) => {
+            term.write(`${index}: ${saying}\r\n`);
+          });
+          term.write('Use /edit-saying <index> <new-saying> to tweak!\r\n');
+          writePrompt();
+        } else if (line.startsWith('/edit-saying')) {
+          const parts = line.split(' ');
+          if (parts.length < 3) {
+            term.write('Usage: /edit-saying <index> <new-saying>\r\n');
+          } else {
+            const index = parseInt(parts[1], 10);
+            const newSaying = parts.slice(2).join(' ');
+            if (isNaN(index) || index < 0 || index >= memes.length) {
+              term.write('Invalid saying index, brain rotter!\r\n');
+            } else {
+              memes[index] = newSaying;
+              localStorage.setItem('bbsSayings', JSON.stringify(memes));
+              term.write(`Saying ${index} updated to: "${newSaying}"\r\n`);
+            }
+          }
+          writePrompt();
+        } else {
+          term.write(`Bruh, ${line} ain’t a vibe here.\r\n`);
+          writePrompt();
+        }
+      } else if (state === 'editor') {
+        if (line === '/save') {
+          if (currentDocIndex === null) {
+            const doc = { timestamp: Date.now(), content: editorContent };
+            savedDocs.push(doc);
+            term.write('Brain rot doc saved to local storage.\r\n');
+          } else {
+            savedDocs[currentDocIndex] = { timestamp: Date.now(), content: editorContent };
+            term.write('Brain rot doc updated in local storage.\r\n');
+            currentDocIndex = null;
+          }
+          localStorage.setItem('bbsDocs', JSON.stringify(savedDocs));
+          state = 'command';
+          writePrompt();
+        } else {
+          editorContent += line + '\r\n';
+          writePrompt();
+        }
+      } else if (state === 'game') {
+        if (line === 'y') {
+          rotScore += 50;
+          term.write('Correct! That’s pure rot. +50 rot score.\r\n');
+          state = 'command';
+          writePrompt();
+        } else if (line === 'n') {
+          term.write('Wrong! That was rot. No points.\r\n');
+          state = 'command';
+          writePrompt();
+        } else {
+          term.write('Type "y" for rot or "n" for not.\r\n');
+          writePrompt();
+        }
+      }
+    }
+
+    // Initialize PeerJS with username as ID
+    function initPeer() {
+      peer = new Peer(username, { debug: 2 });
+      peer.on('open', (id) => {
+        term.write(`Connected with PeerJS ID: ${id}\r\n`);
+        term.write('Use /connect <peer> with someone’s ID to link up! ↑/↓ for history.\r\n');
+      });
+      peer.on('connection', (conn) => {
+        activeConnections.push(conn);
+        term.write(`\r\n[SYSTEM]: ${conn.peer} has stumbled into ur BrainRotBBS!\r\n`);
+        writePrompt();
+        conn.on('data', (data) => {
+          if (data.startsWith('[INFECT]')) {
+            term.write(`\r\nYou've been infected by ${conn.peer}! Chaos incoming...\r\n`);
+            chaosMode = true;
+            setTimeout(() => {
+              chaosMode = false;
+              term.write('The infection has worn off.\r\n');
+              writePrompt();
+            }, 10000);
+          } else {
+            term.write(`\r\n${data}\r\n`);
+            writePrompt();
+          }
+        });
+        conn.on('close', () => {
+          activeConnections = activeConnections.filter(c => c !== conn);
+          term.write(`\r\n[SYSTEM]: ${conn.peer} has yeeted out of existence.\r\n`);
+          writePrompt();
+        });
+      });
+      peer.on('error', (err) => {
+        term.write(`PeerJS error: ${err}\r\n`);
+      });
+      window.peer = peer;
+    }
+
+    // Start with brain rot welcome
+    term.write('Welcome to BrainRotBBS\r\n');
+    term.write('  .-""""""""-.\r\n');
+    term.write('."          ".\r\n');
+    term.write(': ,          :\r\n');
+    term.write('`._         _.\'\r\n');
+    term.write('  `._     _.\'\r\n');
+    term.write('     `"-"\r\n');
+    term.write('ur brain is toast now\r\n');
+    initInputHandler();
+    writePrompt();
+  </script>
+</body>
+</html>
